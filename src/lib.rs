@@ -136,6 +136,9 @@ struct RandomXCacheInner {
     cache_ptr: *mut randomx_cache,
 }
 
+unsafe impl Send for RandomXCacheInner {}
+unsafe impl Sync for RandomXCacheInner {}
+
 impl Drop for RandomXCacheInner {
     /// De-allocates memory for the `cache` object
     fn drop(&mut self) {
@@ -192,6 +195,9 @@ struct RandomXDatasetInner {
     #[allow(dead_code)]
     cache: RandomXCache,
 }
+
+unsafe impl Send for RandomXDatasetInner {}
+unsafe impl Sync for RandomXDatasetInner {}
 
 impl Drop for RandomXDatasetInner {
     /// De-allocates memory for the `dataset` object.
