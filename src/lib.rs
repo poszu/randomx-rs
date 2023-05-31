@@ -41,7 +41,7 @@ use bindings::{
     randomx_alloc_cache,
     randomx_alloc_dataset,
     randomx_cache,
-    randomx_calculate_hash,
+    randomx_calculate_numeric,
     randomx_create_vm,
     randomx_dataset,
     randomx_dataset_item_count,
@@ -54,7 +54,6 @@ use bindings::{
     randomx_vm,
     randomx_vm_set_cache,
     randomx_vm_set_dataset,
-    RANDOMX_HASH_SIZE,
 };
 use bitflags::bitflags;
 use libc::{c_ulong, c_void};
@@ -62,8 +61,8 @@ use thiserror::Error;
 
 use crate::bindings::{
     randomx_calculate_hash_first,
-    randomx_calculate_hash_last,
-    randomx_calculate_hash_next,
+    randomx_calculate_numeric_last,
+    randomx_calculate_numeric_next,
     randomx_get_flags,
 };
 
@@ -390,24 +389,15 @@ impl RandomXVM {
     /// Calculates a RandomX hash value and returns it, error on failure.
     ///
     /// `input` is a sequence of u8 to be hashed.
-    pub fn calculate_hash(&self, input: &[u8]) -> Result<Vec<u8>, RandomXError> {
+    pub fn calculate_hash(&self, input: &[u8]) -> Result<u64, RandomXError> {
         if input.is_empty() {
             Err(RandomXError::ParameterError("input was empty".to_string()))
         } else {
             let size_input = input.len() as usize;
             let input_ptr = input.as_ptr() as *mut c_void;
-            let arr = [0; RANDOMX_HASH_SIZE as usize];
-            let output_ptr = arr.as_ptr() as *mut c_void;
-            unsafe {
-                randomx_calculate_hash(self.vm, input_ptr, size_input, output_ptr);
-            }
-            // if this failed, arr should still be empty
-            if arr == [0; RANDOMX_HASH_SIZE as usize] {
-                Err(RandomXError::Other("RandomX calculated hash was empty".to_string()))
-            } else {
-                let result = arr.to_vec();
-                Ok(result)
-            }
+
+            let hash = unsafe { randomx_calculate_numeric(self.vm, input_ptr, size_input) };
+            Ok(hash)
         }
     }
 
@@ -415,7 +405,7 @@ impl RandomXVM {
     ///
     /// `input` is an array of a sequence of u8 to be hashed.
     #[allow(clippy::needless_range_loop)] // Range loop is not only for indexing `input`
-    pub fn calculate_hash_set(&self, input: &[&[u8]]) -> Result<Vec<Vec<u8>>, RandomXError> {
+    pub fn calculate_hash_set(&self, input: &[&[u8]]) -> Result<Vec<u64>, RandomXError> {
         if input.is_empty() {
             // Empty set
             return Err(RandomXError::ParameterError("input was empty".to_string()));
@@ -430,51 +420,38 @@ impl RandomXVM {
         }
 
         // For multiple inputs
-        let mut output_ptr: *mut c_void = ptr::null_mut();
-        let arr = [0; RANDOMX_HASH_SIZE as usize];
 
         // Not len() as last iteration assigns final hash
         let iterations = input.len() + 1;
         for i in 0..iterations {
             if i == iterations - 1 {
                 // For last iteration
-                unsafe {
-                    randomx_calculate_hash_last(self.vm, output_ptr);
-                }
+                let hash = unsafe { randomx_calculate_numeric_last(self.vm) };
+                result.push(hash);
             } else {
                 if input[i].is_empty() {
                     // Stop calculations
-                    if arr != [0; RANDOMX_HASH_SIZE as usize] {
+                    if i != 0 {
                         // Complete what was started
-                        unsafe {
-                            randomx_calculate_hash_last(self.vm, output_ptr);
-                        }
+                        unsafe { randomx_calculate_numeric_last(self.vm) };
                     }
                     return Err(RandomXError::ParameterError("input was empty".to_string()));
                 };
                 let size_input = input[i].len() as usize;
                 let input_ptr = input[i].as_ptr() as *mut c_void;
-                output_ptr = arr.as_ptr() as *mut c_void;
+
                 if i == 0 {
                     // For first iteration
                     unsafe {
                         randomx_calculate_hash_first(self.vm, input_ptr, size_input);
                     }
                 } else {
-                    unsafe {
+                    let hash = unsafe {
                         // For every other iteration
-                        randomx_calculate_hash_next(self.vm, input_ptr, size_input, output_ptr);
-                    }
+                        randomx_calculate_numeric_next(self.vm, input_ptr, size_input)
+                    };
+                    result.push(hash);
                 }
-            }
-
-            if i != 0 {
-                // First hash is only available in 2nd iteration
-                if arr == [0; RANDOMX_HASH_SIZE as usize] {
-                    return Err(RandomXError::Other("RandomX hash was zero".to_string()));
-                }
-                let output: Vec<u8> = arr.to_vec();
-                result.push(output);
             }
         }
         Ok(result)
@@ -540,12 +517,11 @@ mod tests {
         let cache1 = RandomXCache::new(flags, key.as_bytes()).unwrap();
         let mut vm1 = RandomXVM::new(flags, Some(cache1.clone()), None).unwrap();
         let hash1 = vm1.calculate_hash(input.as_bytes()).expect("no data");
-        let vec = vec![0u8; hash1.len() as usize];
-        assert_ne!(hash1, vec);
+        assert_ne!(hash1, 0);
         let reinit_cache = vm1.reinit_cache(cache1.clone());
         assert!(reinit_cache.is_ok());
         let hash2 = vm1.calculate_hash(input.as_bytes()).expect("no data");
-        assert_ne!(hash2, vec);
+        assert_ne!(hash2, 0);
         assert_eq!(hash1, hash2);
 
         let cache2 = RandomXCache::new(flags, key.as_bytes()).unwrap();
@@ -557,11 +533,11 @@ mod tests {
         let dataset3 = RandomXDataset::new(flags, cache3.clone(), 0).unwrap();
         let mut vm3 = RandomXVM::new(flags2, None, Some(dataset3.clone())).unwrap();
         let hash4 = vm3.calculate_hash(input.as_bytes()).expect("no data");
-        assert_ne!(hash3, vec);
+        assert_ne!(hash3, 0);
         let reinit_dataset = vm3.reinit_dataset(dataset3.clone());
         assert!(reinit_dataset.is_ok());
         let hash5 = vm3.calculate_hash(input.as_bytes()).expect("no data");
-        assert_ne!(hash4, vec);
+        assert_ne!(hash4, 0);
         assert_eq!(hash4, hash5);
 
         let cache4 = RandomXCache::new(flags, key.as_bytes()).unwrap();
@@ -590,10 +566,9 @@ mod tests {
         let vm = RandomXVM::new(flags, Some(cache.clone()), None).unwrap();
         let hashes = vm.calculate_hash_set(inputs.as_slice()).expect("no data");
         assert_eq!(inputs.len(), hashes.len());
-        let mut prev_hash = Vec::new();
+        let mut prev_hash = 0;
         for (i, hash) in hashes.into_iter().enumerate() {
-            let vec = vec![0u8; hash.len() as usize];
-            assert_ne!(hash, vec);
+            assert_ne!(hash, 0);
             assert_ne!(hash, prev_hash);
             let compare = vm.calculate_hash(inputs[i]).unwrap(); // sanity check
             assert_eq!(hash, compare);
@@ -612,10 +587,7 @@ mod tests {
         let dataset = RandomXDataset::new(flags, cache.clone(), 0).unwrap();
         let vm = RandomXVM::new(flags, Some(cache.clone()), Some(dataset.clone())).unwrap();
         let hash = vm.calculate_hash(input.as_bytes()).expect("no data");
-        assert_eq!(hash, [
-            114, 81, 192, 5, 165, 242, 107, 100, 184, 77, 37, 129, 52, 203, 217, 227, 65, 83, 215, 213, 59, 71, 32,
-            172, 253, 155, 204, 111, 183, 213, 157, 155
-        ]);
+        assert_eq!(12782629421007303444, hash);
         drop(vm);
         drop(dataset);
         drop(cache);
@@ -624,10 +596,7 @@ mod tests {
         let dataset1 = RandomXDataset::new(flags, cache1.clone(), 0).unwrap();
         let vm1 = RandomXVM::new(flags, Some(cache1.clone()), Some(dataset1.clone())).unwrap();
         let hash1 = vm1.calculate_hash(input.as_bytes()).expect("no data");
-        assert_eq!(hash1, [
-            114, 81, 192, 5, 165, 242, 107, 100, 184, 77, 37, 129, 52, 203, 217, 227, 65, 83, 215, 213, 59, 71, 32,
-            172, 253, 155, 204, 111, 183, 213, 157, 155
-        ]);
+        assert_eq!(12782629421007303444, hash1);
         drop(vm1);
         drop(dataset1);
         drop(cache1);
@@ -644,10 +613,7 @@ mod tests {
         drop(dataset);
         drop(cache);
         let hash = vm.calculate_hash(input.as_bytes()).expect("no data");
-        assert_eq!(hash, [
-            114, 81, 192, 5, 165, 242, 107, 100, 184, 77, 37, 129, 52, 203, 217, 227, 65, 83, 215, 213, 59, 71, 32,
-            172, 253, 155, 204, 111, 183, 213, 157, 155
-        ]);
+        assert_eq!(12782629421007303444, hash);
         drop(vm);
 
         let cache1 = RandomXCache::new(flags, key.as_bytes()).unwrap();
@@ -656,10 +622,7 @@ mod tests {
         drop(dataset1);
         drop(cache1);
         let hash1 = vm1.calculate_hash(input.as_bytes()).expect("no data");
-        assert_eq!(hash1, [
-            114, 81, 192, 5, 165, 242, 107, 100, 184, 77, 37, 129, 52, 203, 217, 227, 65, 83, 215, 213, 59, 71, 32,
-            172, 253, 155, 204, 111, 183, 213, 157, 155
-        ]);
+        assert_eq!(12782629421007303444, hash1);
         drop(vm1);
     }
 
@@ -691,17 +654,11 @@ mod tests {
         // test vectors from https://github.com/tevador/RandomX/blob/040f4500a6e79d54d84a668013a94507045e786f/src/tests/tests.cpp#L963-L979
         let key = b"test key 000";
         let vectors = [
-            (
-                b"This is a test".as_slice(),
-                "639183aae1bf4c9a35884cb46b09cad9175f04efd7684e7262a0ac1c2f0b4e3f",
-            ),
-            (
-                b"Lorem ipsum dolor sit amet".as_slice(),
-                "300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969",
-            ),
+            (b"This is a test".as_slice(), 2705037248115674124),
+            (b"Lorem ipsum dolor sit amet".as_slice(), 9395832178737531964),
             (
                 b"sed do eiusmod tempor incididunt ut labore et dolore magna aliqua".as_slice(),
-                "c36d4ed4191e617309867ed66a443be4075014e2b061bcdaf9ce7b721d2b77a8",
+                1276421477095602454,
             ),
         ];
 
@@ -712,7 +669,7 @@ mod tests {
 
         for (input, expected) in vectors {
             let hash = vm.calculate_hash(input).unwrap();
-            assert_eq!(hex::decode(expected).unwrap(), hash);
+            assert_eq!(expected, hash);
         }
     }
 
@@ -720,25 +677,21 @@ mod tests {
     fn test_vectors_light_mode() {
         // test vectors from https://github.com/tevador/RandomX/blob/040f4500a6e79d54d84a668013a94507045e786f/src/tests/tests.cpp#L963-L985
         let vectors = [
-            (
-                b"test key 000",
-                b"This is a test".as_slice(),
-                "639183aae1bf4c9a35884cb46b09cad9175f04efd7684e7262a0ac1c2f0b4e3f",
-            ),
+            (b"test key 000", b"This is a test".as_slice(), 2705037248115674124),
             (
                 b"test key 000",
                 b"Lorem ipsum dolor sit amet".as_slice(),
-                "300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969",
+                9395832178737531964,
             ),
             (
                 b"test key 000",
                 b"sed do eiusmod tempor incididunt ut labore et dolore magna aliqua".as_slice(),
-                "c36d4ed4191e617309867ed66a443be4075014e2b061bcdaf9ce7b721d2b77a8",
+                1276421477095602454,
             ),
             (
                 b"test key 001",
                 b"sed do eiusmod tempor incididunt ut labore et dolore magna aliqua".as_slice(),
-                "e9ff4503201c0c2cca26d285c93ae883f9b1d30c9eb240b820756f2d5a7905fc",
+                4700193635115746148,
             ),
         ];
 
@@ -747,7 +700,7 @@ mod tests {
             let cache = RandomXCache::new(flags, key).unwrap();
             let vm = RandomXVM::new(flags, Some(cache), None).unwrap();
             let hash = vm.calculate_hash(input).unwrap();
-            assert_eq!(hex::decode(expected).unwrap(), hash);
+            assert_eq!(expected, hash);
         }
     }
 }
