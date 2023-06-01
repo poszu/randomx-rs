@@ -69,6 +69,7 @@ use crate::bindings::{
 
 bitflags! {
     /// RandomX Flags are used to configure the library.
+    #[repr(transparent)]
     pub struct RandomXFlag: u32 {
         /// No flags set. Works on all platforms, but is the slowest.
         const FLAG_DEFAULT      = 0b0000_0000;
