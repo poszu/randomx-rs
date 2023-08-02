@@ -70,6 +70,7 @@ use crate::bindings::{
 bitflags! {
     /// RandomX Flags are used to configure the library.
     #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct RandomXFlag: u32 {
         /// No flags set. Works on all platforms, but is the slowest.
         const FLAG_DEFAULT      = 0b0000_0000;
@@ -103,9 +104,7 @@ impl RandomXFlag {
     ///
     /// The above flags need to be set manually, if required.
     pub fn get_recommended_flags() -> RandomXFlag {
-        RandomXFlag {
-            bits: unsafe { randomx_get_flags() },
-        }
+        RandomXFlag::from_bits_truncate(unsafe { randomx_get_flags() })
     }
 }
 
@@ -113,6 +112,20 @@ impl Default for RandomXFlag {
     /// Default value for RandomXFlag
     fn default() -> RandomXFlag {
         RandomXFlag::FLAG_DEFAULT
+    }
+}
+
+impl std::fmt::Display for RandomXFlag {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl std::str::FromStr for RandomXFlag {
+    type Err = bitflags::parser::ParseError;
+
+    fn from_str(flags: &str) -> Result<Self, Self::Err> {
+        bitflags::parser::from_str(flags)
     }
 }
 
@@ -171,7 +184,7 @@ impl RandomXCache {
         if key.is_empty() {
             Err(RandomXError::ParameterError("key is empty".to_string()))
         } else {
-            let test = unsafe { randomx_alloc_cache(flags.bits) };
+            let test = unsafe { randomx_alloc_cache(flags.bits()) };
             if test.is_null() {
                 Err(RandomXError::CreationError("Could not allocate cache".to_string()))
             } else {
@@ -230,7 +243,7 @@ impl RandomXDataset {
         let item_count = RandomXDataset::count()
             .map_err(|e| RandomXError::CreationError(format!("Could not get dataset count: {e:?}")))?;
 
-        let test = unsafe { randomx_alloc_dataset(flags.bits) };
+        let test = unsafe { randomx_alloc_dataset(flags.bits()) };
         if test.is_null() {
             Err(RandomXError::CreationError("Could not allocate dataset".to_string()))
         } else {
@@ -347,7 +360,7 @@ impl RandomXVM {
                     .as_ref()
                     .map(|data| data.inner.dataset_ptr)
                     .unwrap_or_else(ptr::null_mut);
-                let vm = unsafe { randomx_create_vm(flags.bits, cache_ptr, dataset_ptr) };
+                let vm = unsafe { randomx_create_vm(flags.bits(), cache_ptr, dataset_ptr) };
                 Ok(RandomXVM {
                     vm,
                     flags,
