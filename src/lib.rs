@@ -305,6 +305,8 @@ impl Drop for RandomXVM {
     }
 }
 
+unsafe impl Send for RandomXVM {}
+
 impl RandomXVM {
     /// Creates a new `VM` and initializes it, error on failure.
     ///
