@@ -19,6 +19,7 @@
 // SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 use std::{
     env,
     fs,
@@ -87,6 +88,39 @@ fn main() {
             .arg("CMAKE_C_COMPILER=/usr/bin/aarch64-linux-gnu-gcc")
             .arg("-D")
             .arg("CMAKE_CXX_COMPILER=/usr/bin/aarch64-linux-gnu-g++")
+            .arg(repo_dir.to_str().unwrap())
+            .output()
+            .expect("failed to execute CMake");
+        println!("status: {}", c.status);
+        std::io::stdout().write_all(&c.stdout).unwrap();
+        std::io::stderr().write_all(&c.stderr).unwrap();
+        assert!(c.status.success());
+
+        let m = Command::new("cmake")
+            .arg("--build")
+            .arg(".")
+            .arg("--config")
+            .arg("Release")
+            .output()
+            .expect("failed to execute Make");
+        println!("status: {}", m.status);
+        std::io::stdout().write_all(&m.stdout).unwrap();
+        std::io::stderr().write_all(&m.stderr).unwrap();
+        assert!(m.status.success());
+    } else if target.contains("riscv64gc-unknown-linux-gnu") {
+        let c = Command::new("cmake")
+            .arg("-D")
+            .arg("ARCH=rv64gc")
+            .arg("-D")
+            .arg("ARCH_ID=riscv64")
+            .arg("-D")
+            .arg("CMAKE_CROSSCOMPILING=true")
+            .arg("-D")
+            .arg("CMAKE_SYSTEM_PROCESSOR=riscv64")
+            .arg("-D")
+            .arg("CMAKE_C_COMPILER=/usr/bin/riscv64-linux-gnu-gcc")
+            .arg("-D")
+            .arg("CMAKE_CXX_COMPILER=/usr/bin/riscv64-linux-gnu-g++")
             .arg(repo_dir.to_str().unwrap())
             .output()
             .expect("failed to execute CMake");
